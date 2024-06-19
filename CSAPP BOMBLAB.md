@@ -228,3 +228,75 @@ disas phase_3
 1 0
 3 0
 7 0
+
+---------------
+**Bomb5**
+
+	disas phase_5
+	Dump of assembler code for function phase_5:
+	   0x0000000000401062 <+0>:     push   %rbx
+	   0x0000000000401063 <+1>:     sub    $0x20,%rsp
+	   0x0000000000401067 <+5>:     mov    %rdi,%rbx  // rdi: 输入的字符串
+	   0x000000000040106a <+8>:     mov    %fs:0x28,%rax
+	   0x0000000000401073 <+17>:    mov    %rax,0x18(%rsp)
+	   0x0000000000401078 <+22>:    xor    %eax,%eax
+	   0x000000000040107a <+24>:    callq  0x40131b <string_length>
+	   0x000000000040107f <+29>:    cmp    $0x6,%eax // 密码为6个字符的字符串
+	   0x0000000000401082 <+32>:    je     0x4010d2 <phase_5+112>
+	   0x0000000000401084 <+34>:    callq  0x40143a <explode_bomb>
+	   0x0000000000401089 <+39>:    jmp    0x4010d2 <phase_5+112>
+	   //for循环 for(int i = 0 ; i < 6 ; i ++)
+			   {
+				   edx = InputString[i] & 0xf;
+				   rsi = 0x4024b0[edx];
+			   }
+		   0x000000000040108b <+41>:    movzbl (%rbx,%rax,1),%ecx  
+		   // ecx: 依次遍历取输入的6个字符, eg..: i = 0, ecx = 'a'
+		   0x000000000040108f <+45>:    mov    %cl,(%rsp) // cl = ecx低8位 = 'a'
+		   0x0000000000401092 <+48>:    mov    (%rsp),%rdx
+		   0x0000000000401096 <+52>:    and    $0xf,%edx //取得0x4024b0的位数rdx
+		   0x0000000000401099 <+55>:    movzbl 0x4024b0(%rdx),%edx
+		   0x00000000004010a0 <+62>:    mov    %dl,0x10(%rsp,%rax,1)
+		   0x00000000004010a4 <+66>:    add    $0x1,%rax
+		   0x00000000004010a8 <+70>:    cmp    $0x6,%rax
+		   0x00000000004010ac <+74>:    jne    0x40108b <phase_5+41>
+		   // x/s 0x4024b0
+		   //0x4024b0 <array.3449>:  "maduiersnfotvbylSo you think you can stop the 
+		   //bomb with ctrl-c, do you?" , 在0x4024b0 + rax
+		   //找到第一位'f'对应位数为9, 即InputString[0]应在与0xf and 后得到0x9，以此类推
+		   // 因此, InputString[0]- 'f' - rax = 9 - 最后四位应为1001 - 'i' etc..
+		   //InputString[1] - 'l' - rax = 15 - 最后四位应为1111 - 'o' etc..
+		   //InputString[2] - 'y' - rax = 14 - 最后四位应为1110 - 'n' etc..
+		   //InputString[3] - 'e' - rax = 5 - 最后四位应为0101 - 'e' etc..
+		   //InputString[4] - 'r' - rax = 6 - 最后四位应为0110 - 'f' etc..
+		   //InputString[5] - 's' - rax = 7 - 最后四位应为0111 - 'g' etc..
+		   //password 1 : ionefg etc..
+	   0x00000000004010ae <+76>:    movb   $0x0,0x16(%rsp)
+	   0x00000000004010b3 <+81>:    mov    $0x40245e,%esi 
+	   // esi，一般用来存储字符串，x/s 0x40245e 得到变形后的答案"flyers"
+	   //因此根据上面的for循环，逆向还原输入应为""
+	   0x00000000004010b8 <+86>:    lea    0x10(%rsp),%rdi 
+	   // "flyers"应与0x10(%rsp)+ 1 to 5 对应
+	   0x00000000004010bd <+91>:    callq  0x401338 <strings_not_equal>
+	   0x00000000004010c2 <+96>:    test   %eax,%eax
+	   0x00000000004010c4 <+98>:    je     0x4010d9 <phase_5+119>
+	   0x00000000004010c6 <+100>:   callq  0x40143a <explode_bomb>
+	   0x00000000004010cb <+105>:   nopl   0x0(%rax,%rax,1)
+	   0x00000000004010d0 <+110>:   jmp    0x4010d9 <phase_5+119>
+	   0x00000000004010d2 <+112>:   mov    $0x0,%eax
+	   0x00000000004010d7 <+117>:   jmp    0x40108b <phase_5+41>
+	   0x00000000004010d9 <+119>:   mov    0x18(%rsp),%rax
+	   0x00000000004010de <+124>:   xor    %fs:0x28,%rax
+	   0x00000000004010e7 <+133>:   je     0x4010ee <phase_5+140>
+	   0x00000000004010e9 <+135>:   callq  0x400b30 <__stack_chk_fail@plt>
+	   0x00000000004010ee <+140>:   add    $0x20,%rsp
+	   0x00000000004010f2 <+144>:   pop    %rbx
+	   0x00000000004010f3 <+145>:   retq   
+	End of assembler dump.
+**Bomb5 password:**
+InputString[0] - 最后四位应为1001 - 'i' etc..
+InputString[1] - 最后四位应为1111 - 'o' etc..
+InputString[2] - 最后四位应为1110 - 'n' etc..
+InputString[3] - 最后四位应为0101 - 'e' etc..
+InputString[4] - 最后四位应为0110 - 'f' etc..
+InputString[5] - 最后四位应为0111 - 'g' etc..
