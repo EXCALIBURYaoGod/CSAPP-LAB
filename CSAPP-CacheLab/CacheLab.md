@@ -1,3 +1,5 @@
+
+
 # CacheLab
 
 实验目的：
@@ -32,14 +34,14 @@ Part B要求优化矩阵转置函数，最小化高速缓存的不命中的次�
 
 ![image-20240705150605685](../imgs/image-20240705150605685.png) 
 
-在本实验中，内存操作格式为：[space]operation address, size
+在本实验中，内存操作格式为：`[space]operation address, size`
 
 operation 有 4 种：
 
-'I'  表示加载指令，表示从内存中读取指令内容
-'L' 加载数据，表示程序从某个内存地址加载了数据。（缓存命中、不命中、执行替换策略）
-'S' 存储数据，表示程序向某个内存地址存储了数据。（写回、写分配）
-'M' 修改数据，表示程序对某个内存地址的数据进行了修改。
+- `I` 表示加载指令，表示从内存中读取指令内容
+- `L`加载数据，表示程序从某个内存地址加载了数据。（缓存命中、不命中、执行替换策略）
+- `S` 存储数据，表示程序向某个内存地址存储了数据。（写回、写分配）
+- `M` 修改数据，表示程序对某个内存地址的数据进行了修改。
 
 不需要考虑加载指令`I`,`M`指令相当于先进行`L`再进行`S`，模拟器要做出的反馈有 3 种：
 
@@ -69,4 +71,64 @@ typedef struct
     int timestamp;  //时间戳
 }cache_line;    //一个高速缓存行
 ```
+
+从Linux命令行中读取参数信息，并初始化cache：
+
+```
+cache_line** create_cache(int argc, char** argv){
+    int opt;
+    while(-1 != (opt = getopt(argc, argv, "vs:E:b:t:"))){
+        switch(opt){
+            case 'v':
+                verbose = 1;    //设置verbose为1，表示详细输出缓存过程
+                break;
+            case 's':
+                s = atoi(optarg);
+                break;
+            case 'E':
+                E = atoi(optarg);
+                break;
+            case 'b':
+                b = atoi(optarg);
+                break;
+            case 't':
+                strcpy(t, optarg);
+                break;
+            default:
+                break;  //程序健壮性检验，如果不是一个合法的参数，就会退出switch,继续while读取
+        }
+    }
+
+    int row = pow(2, s);
+    int col = E;
+    cache_line** cache = (cache_line)malloc(row * sizeof(cache_line*));  //动态内存分配
+    if(cache == NULL)
+    {
+        printf("Failed to allocate memory!\n");
+        exit(1);
+    }
+    for(int i = 0; i < row; i ++){
+        cache[i] = (cache_line*)malloc(col * sizeof(cache_line));
+        if(cache[i] == NULL)
+        {
+            printf("Failed to allocate memory!\n");
+            exit(1);
+        }
+    }
+    //初始化，有效位为0，时间戳为0
+    for(int i = 0; i < row; i ++){
+        for(j = 0; j < col; j ++){
+            cache[i][j].valid = 0;
+            cache[i][j].timestamp = 0;
+        }
+    }
+    return cache;
+}
+```
+
+### 读入.trace文件中的内存操作
+
+**读取文件`t`的每一行**，对指令进行解析，然后获取地址映射的组索引、标记，用于后续在模拟高速缓存时，在高速缓存中查找这个地址的内容
+
+使用课件中建议的`fscanf`函数，读取文件`t`的每一行指令。
 
