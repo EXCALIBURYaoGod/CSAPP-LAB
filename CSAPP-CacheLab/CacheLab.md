@@ -26,7 +26,7 @@ Part B要求优化矩阵转置函数，最小化高速缓存的不命中的次�
 
 ## Part A
 
-### 预备理论：
+### 预备理论
 
 ![image-20240705150127579](../imgs/image-20240705150127579.png) 
 
@@ -49,7 +49,7 @@ operation 有 4 种：
 - `miss`：不命中，表示要操作的数据不在对应组的任何一行
 - `eviction`：驱逐，表示要操作的数据的对应组已满，进行了替换操作
 
-### PartA的主要操作：
+### PartA的主要操作
 
 编写csim.c，这个程序的执行效果要与csim-ref相同，能够模拟一个高速缓存器（参数自定义），执行traces/xx.trace中的内存操作过程。这个模拟器不需要真的存储数据，只是计算traces/xx.trace的内存操作过程中，缓存的命中、不命中、LRU替换的数量，然后将这些参数作为答案，传给printSummary函数。
 
@@ -83,10 +83,10 @@ cache_line** create_cache(int argc, char** argv){
                 verbose = 1;    //设置verbose为1，表示详细输出缓存过程
                 break;
             case 's':
-                s = atoi(optarg);
+                s = atoi(optarg); //组数 2 ^ s
                 break;
             case 'E':
-                E = atoi(optarg);
+                E = atoi(optarg);	//缓存行数
                 break;
             case 'b':
                 b = atoi(optarg);
@@ -126,9 +126,154 @@ cache_line** create_cache(int argc, char** argv){
 }
 ```
 
-### 读入.trace文件中的内存操作
+#### 读入.trace文件中的内存操作
 
 **读取文件`t`的每一行**，对指令进行解析，然后获取地址映射的组索引、标记，用于后续在模拟高速缓存时，在高速缓存中查找这个地址的内容
 
 使用课件中建议的`fscanf`函数，读取文件`t`的每一行指令。
+
+```
+void get_trace(cache_line** cache){
+    FILE *fp = fopen(t, "r");
+    if(fp == NULL){
+        perror("Error opening file")
+        exit(1);
+    }
+
+    char operation;
+    unsigned long addr;
+    int bytes; n 
+    int set;
+    unsigned long tag;
+
+    while(fscanf(fp, " %c %lx,%d", &operation, &addr, &bytes) == 3){
+        set = (addr>>b) & (unsigned long)((1<<s)-1);
+        tag = addr >> (b+s);
+        switch(operation)
+        {
+            case 'L':
+            case 'S':
+                if(verbose) printf("%c %lx,%d ", operation, addr, bytes);
+                cache_simulate(cache, set, tag);
+                if(verbose) printf("\n");
+                break;
+            case 'M':
+                if(verbose) printf("%c %lx,%d ", operation, addr, bytes);
+                cache_simulate(cache, set, tag);
+                cache_simulate(cache, set, tag);
+                if(verbose) printf("\n");
+                break;
+            default:
+                break;
+        }
+    }
+}
+```
+
+#### 模拟高速缓存
+
+根据从内存操作中由地址映射的组索引 `set`、标记`tag`，模拟缓存过程
+
+为了简化参数，我使用一个数组`result[3]`来存放`hit`、`miss`、`eviction`的次数。
+
+为了记录缓存行`cache[i][j]`最后被执行的时间，即**设置时间戳**`cache[i][j].timestamp`，我使用一个全局变量`T`作为整体的时间。初始`T`设置为`0`，每当进行一次缓存(caching)，就要对`T`加`1`，这样当需要进行LRU替换时，我们**遍历查找这个组，驱逐时间戳最小的缓存行**。恰好我们在每一次缓存(caching)后，使用`update`函数更新缓存(cache)的信息，所以当调用`update`函数时，就意味着进行了一次缓存(caching)，因此可以在`update`函数中对`T`加`1`，更新整体的时间。
+
+##### 行匹配
+
+遍历检查缓存行`cache[set][j]`的有效位和标记位，以确定地址中的字是否在缓存中。如果找到了一个有效的行`cache[set][pos]`，它的标记与地址中的标记`tag`相匹配，则**缓存命中**；若遍历了所有的行都不匹配，则为**缓存不命中**
+
+  ```
+  void cache_simulate(cache_line** cache, int set, unsigned long tag){
+      bool find = false;   //标识是否缓存命中
+      int col = E;
+      int pos = 0;
+      //缓存命中
+      for(int j = 0; j < col; j ++){
+          if(cache[set][j].valid == 1 && cache[set][j].tag == tag){
+              pos = j;
+              update(cache[set], HIT, pos, tag);
+              find = true;
+              break;
+          }
+      }
+      //缓存未命中，先用一个数组occupancy表示cache[set]中缓存行数目
+      if(!find){
+          if(occupancy[set] != E){
+              occupancy[set] ++;
+              for(int j = 0; j < col; j ++){
+                  if(cache[set][j].valid == 0){   
+                      pos = j;
+                      update(cache[set], MISS, pos, tag); //将空缓存行替换为目标数据块
+                      break;
+                  }else{
+                      pos = LRU_replace(cache[set]);  //若都有效，则用LRU策略替换
+                      update(cache[set], MISS, pos, tag);
+                      update(cache[set], EVICTION, pos, tag); //缓存EVICTION
+                  }
+              }
+          }
+      }
+  }
+  
+  void update(cache_line* cache_set, enum Category category, int pos, int tag){
+  
+      result[category] ++;
+      printf("%s ", category_string[category]);
+      cache_set[pos].tag = tag;
+      cache_set[pos].valid = 1;
+      cache_set[pos].timestamp = T;
+      T ++;
+  }
+  
+  //遍历得出时间戳最小的缓存行pos
+  int LRU_replace(cache_line* cache_set){
+      int min = cache_set[0].timestamp;
+      int pos = 0;
+      for(int j = 1; j < E; j ++){
+          if(cache_set[j].timestamp < min){
+              pos = j;
+              min = cache_set[j].timestamp;
+          }
+      }
+      return pos;
+  }
+  
+  //释放内存
+  void destory(cache_line** cache){
+      int row = pow(2, s);
+      for(int i = 0; i < row; i ++){
+          free(cache[i]);
+      }
+      free(cache);
+  }
+  ```
+
+### 测试
+
+![image-20240708164915018](../imgs/image-20240708164915018.png) 
+
+## Part B
+
+### 预备理论
+
+- 矩阵分块转置技术：将一个矩阵分为不同大小的块再进行转置。
+- C语言中二维数组在内存中是逐行连续存储的，读取`A[0][0]`时，`A[0][1]`,`A[0][2]`等也会按行被加载进缓存，但是写入`B[0][0]`时，`B[1][0]`，`B[2][0]`并不在相邻的内存地址块中，因此可能造成缓存不命中。
+
+### Part B的主要操作
+
+在`trans.c`中，使用分块技术优化矩阵转置函数，处理三个不同的输入`32 * 32`,`64 * 64`,`61 * 67`，你要将优化后的函数写到`transpose_submit`函数里。
+
+### 实验说明
+
+1、只运行使用最多12个int局部变量
+
+2、不能使用递归函数
+
+3、不能对原始的矩阵A进行修改
+
+4、不能通过malloc申请空间
+
+测试的高速缓存架构为`s = 5, E = 1, b = 5`
+
+`b = 5`表示每个缓冲行能存32个字节，即8个int数据（c语言）
 
