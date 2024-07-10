@@ -248,7 +248,7 @@ void get_trace(cache_line** cache){
   }
   ```
 
-### 测试
+### 实验结果
 
 ![image-20240708164915018](../imgs/image-20240708164915018.png) 
 
@@ -448,3 +448,30 @@ void transpose_64x64(int M, int N, int A[N][M], int B[M][N])
 ##### 优化结果
 
 ![image-20240709180750469](..\imgs\image-20240709180750469.png) 
+
+#### 61x67 矩阵转置优化
+
+**性能分析：**因为是不规则的矩阵，因此缓存区必定有未填满的set组。矩阵每隔一行相差9组。这里引入16x16分块，刚好满分。
+
+```
+void transpose_submit(int M, int N, int A[N][M], int B[M][N])
+{
+     for (int i=0; i<N; i+=16)
+     {
+         for(int j=0; j<M; j+=16)
+         {
+             for(int k=i; k<i+16 && k<N; ++k)
+             {
+                 for(int s=j; s<j+16 && s<M; ++s)
+                 {
+                     B[s][k] = A[k][s];
+                 }
+             }  
+         }
+     }
+}
+```
+
+##### 优化结果
+
+![image-20240710184006076](..\imgs\image-20240710184006076.png) 
