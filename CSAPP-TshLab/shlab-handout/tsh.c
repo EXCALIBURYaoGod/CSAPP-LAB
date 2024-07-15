@@ -283,6 +283,9 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    sigset_t mask_one, prev_one;
+    sigaddset(&mask_one, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &mask_one, &prev_one);
     if (!strcmp(argv[0], "quit"))
     {
         exit(0);
@@ -290,17 +293,21 @@ int builtin_cmd(char **argv)
     else if (!strcmp(argv[0], "jobs"))
     {
         listjobs(jobs);
+        sigprocmask(SIG_SETMASK, &prev_one, NULL);
         return 1;
     }
     else if (!strcmp(argv[0], "bg") || !strcmp(argv[0], "fg"))
     {
         do_bgfg(argv);
+        sigprocmask(SIG_SETMASK, &prev_one, NULL);
         return 1;
     }
     else if (!strcmp(argv[0], "&"))
     {
+        sigprocmask(SIG_SETMASK, &prev_one, NULL);
         return 1;
     }
+    sigprocmask(SIG_SETMASK, &prev_one, NULL);
     return 0;     /* not a builtin command */
 }
 
@@ -467,7 +474,7 @@ void sigtstp_handler(int sig)
     if ((pid = fgpid(jobs)) != 0)
     {
         sigprocmask(SIG_SETMASK, &prev, NULL);
-        kill(-pid, SIGSTOP);
+        kill(-pid, SIGTSTP);
     }
     errno = olderrno;
     return;
