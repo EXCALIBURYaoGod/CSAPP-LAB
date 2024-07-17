@@ -73,8 +73,8 @@ team_t team = {
 #define PREV_BLKP(bp) ((char*)(bp) - GET_SIZE(((char*)(bp) - DSIZE)))
 
 /* 总是指向序言块的第二块 */
-static char* heap_list;
-static void* next_fitp;     //下一次适配指向的指针
+static char *heap_list;
+
 /************************/
 static void *extend_heap(size_t words);     //扩展堆
 static void *coalesce(void *bp);            //合并空闲块
@@ -101,7 +101,7 @@ int mm_init(void)
     PUT(heap_list + (3*WSIZE), PACK(0, 1));         /* 结尾块 */
 
     heap_list += (2*WSIZE); //令heap_list指向有效载荷起始处
-    next_fitp = heap_list;
+
     /* 扩展空闲空间 */
     if(extend_heap(CHUNKSIZE/WSIZE) == NULL)
         return -1;
@@ -124,7 +124,7 @@ void *mm_malloc(size_t size)
     else
         asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
     /* 寻找合适的空闲块 */
-    if((bp = best_fit(asize)) != NULL){
+    if((bp = find_fit(asize)) != NULL){
         place(bp, asize);
         return bp;
     }
@@ -240,9 +240,6 @@ void *coalesce(void *bp)
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));  //增加当前块大小
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        if (bp == next_fitp) {
-            next_fitp = PREV_BLKP(bp);
-        }
         bp = PREV_BLKP(bp);                     //注意指针要变
     }
     /* 都空 */
@@ -250,9 +247,6 @@ void *coalesce(void *bp)
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));  //增加当前块大小
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        if (bp == next_fitp) {
-            next_fitp = PREV_BLKP(bp);
-        }
         bp = PREV_BLKP(bp);
     }
     return bp;
@@ -286,36 +280,3 @@ void *best_fit(size_t asize){
     }
     return best_bp;
 } 
-//下一次适配
-void *next_fit(size_t size){
-    char *endp, *lastp;
-    next_fitp = NEXT_BLKP(next_fitp);    //此次开始搜索的位置
-    endp = (char *)mem_heap_hi() + 1;
-    lastp = next_fitp;
-
-    do {
-        if (next_fitp == endp) {
-            next_fitp = heap_list;
-            continue;
-        }
-        if (!GET_ALLOC(HDRP(next_fitp)) && (GET_SIZE(HDRP(next_fitp)) >= size)) 
-            return next_fitp;
-        next_fitp = NEXT_BLKP(next_fitp);
-    } while(next_fitp != lastp);
-
-    return NULL;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-

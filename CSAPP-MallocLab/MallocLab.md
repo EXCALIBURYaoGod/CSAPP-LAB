@@ -6,7 +6,402 @@ CSAPP 9.9 动态内存分配，9.10内存垃圾回收
 
 ## 实验概览
 
+Malloc Lab 要求用 C 语言编写一个动态存储分配器，即实现 malloc，free 和 realloc 函数。
 
+性能表现主要考虑两点：
 
+- 空间利用率：mm_malloc 或 mm_realloc 函数分配且未被 mm_free 释放的内存与堆的大小的比值。应该找到好的策略使碎片最小化，以使该比率尽可能接近 1
+- 吞吐率：每单位时间完成的最大请求数，即要使时间复杂度尽可能小
 
+分数计算公式： 
 
+![img](https://pic2.zhimg.com/80/v2-624ee6c9bcadad03c307437aaf8b9181_720w.webp) 
+
+## 实现思路
+
+动态内存分配器维护着一个进程的**虚拟内存**区域，称为堆。如图：
+
+![img](https://pic2.zhimg.com/80/v2-334e0fc5b423aa5ba2d4e369cbc7a4a5_720w.webp)
+
+分配器将堆视为一组大小不同的块的集合来维护，且它们的地址是连续的。将块标记为两种，已分配的块供应用程序使用，空闲块用来分配。
+
+怎样来组织这些块呢？课本为我们提供了三种实现方式：
+
+### Implicit Free List
+
+把所有块连接起来，每次分配时从头到尾扫描合适的空闲块，我在实验的第一部分实现了这个做法
+
+### Explicit Free Lists
+
+它是 Implicit Free List 的进一步优化，在所有空闲块中记录两个指针，分别指向前一个空闲块和后一个空闲块，相当于在链表中又嵌套了一个链表，这样分配的时候就不需要遍历已分配块了，将分配时间从块总数的线性时间缩短为空闲块数量的线性时间
+
+![img](https://pic4.zhimg.com/80/v2-15b4196da3fd82c43320b2edff579ed3_720w.webp)
+
+### Segregated Free Lists
+
+维护多个空闲链表，每个链表中的块有大致相等的大小，分配器维护着一个空闲链表数组，每个大小类一个空闲链表，当需要分配块时只需要在对应的空闲链表中搜索就好了，书上描述了两种分离存储的方法
+
+**Simple Segregated Storage**
+
+从不合并与分离，每个块的大小就是大小类中最大元素的大小。例如大小类为 {17~32}，则需要分配块的大小在这个区间时均在此对应链表进行分配，并且都是分配大小为 32 的块。这样做，显然分配和释放都是常数级的，但是空间利用率较低
+
+**Segregated Fit**
+
+每个大小类的空闲链表包含大小不同的块，分配完一个块后，将这个块进行分割，并根据剩下的块的大小将其插入到适当大小类的空闲链表中。这个做法平衡了搜索时间与空间利用率，C 标准库提供的 GNU malloc 包就是采用的这种方法。我在实验的第二部分实现了这个做法
+
+## Implicit Free List 实现
+
+CSAPP 详细讲述了基于隐式空闲链表，使用立即边界合并方式的实现，我们回顾一下。
+
+要想分数尽可能高，我们需要使吞吐率尽可能高，空间利用率尽可能小，如果从不重复利用任何块，函数的吞吐率会非常好，而空间利用率会很差；而若进行空闲块的分割合并等操作又会影响吞吐率，因而，就要设计合适的数据结构与算法来平衡两者的关系。
+
+- 空闲块组织：利用隐式空闲链表记录空闲块
+
+- 放置策略：如何选择合适的空闲块分配？
+
+- - 首次适配：从头开始搜索空闲链表，选择第一个合适的空闲块
+  - 下一次适配：从上一次查询结束的地方开始搜索选择第一个合适的空闲块
+  - 最佳适配：搜索能放下请求大小的最小空闲块
+
+- 分割：在将一个新分配的块放置到某个空闲块后，剩余的部分要进行处理
+
+- 合并：释放某个块后，要让它与相邻的空闲块合并
+
+无论用什么策略，放置的时间复杂度都为 O(n)，性能很差
+
+### 空闲块组织
+
+每个空闲块的结构如下：
+
+![img](https://pic2.zhimg.com/80/v2-092fc522316822ae3c5508a321c98715_720w.webp)
+
+- 脚部与头部是相同的，均为 4 个字节，用来存储块的大小，以及表明这个块是已分配还是空闲块
+- 由于要求块双字对齐，所以块大小就总是 8 的倍数，低 3 位总是为 0，因而，我们只需要利用头部和脚部的高 29 位存储块的大小，剩下 3 位的最低位来指明这个块是否空闲，000 为空闲，001 为已分配
+
+为什么既设置头部又设置尾部呢？这是为了能够以常数时间来进行块的合并。无论是与下一块还是与上一块合并，都可以通过他们的头部或尾部得知块大小，从而定位整个块，避免了从头遍历链表。
+
+空闲块怎么组织呢？如图：
+
+![img](https://pic2.zhimg.com/80/v2-b9cfe142c46c0f10604d29ed36beea19_720w.webp)
+
+堆有两个特殊的标记：
+
+- 序言块：8 个字节，由一个头部和一个脚部组成
+- 结尾块：大小为 0 的头部
+
+为了消除合并空闲块时边界的考虑，将序言块和结尾块的分配位均设置为已分配。为了保证双字对齐，在序言块的前面还设置了 4 个字节作为填充。
+
+### 函数设计原则
+```
+int mm_init(void);
+```
+
+初始化对齐块，序言块，结尾块，并扩充堆块大小。
+
+```
+void *mm_malloc(size_t size);
+```
+
+寻求合适的空闲块并分配，其间调用其他函数完成。
+
+```
+void mm_free(void *prt);
+```
+
+修改内存块的分配位并合并内存块。
+
+```
+void *mm_realloc(void *ptr, size_t size);
+```
+
+按要求分配内存块。
+
+```
+static void *extend_heap(size_t size);
+```
+
+扩充堆空间，并返回指向结尾扩充后的空闲块的指针
+
+```
+static void *find_fit(size_t size);
+```
+
+首次适配（first-fit）
+
+```
+static void place(char *bp, size_t size);
+```
+
+负责在空闲块内放置数据，使其分割为分配块和空闲块，注意最小块的限制。
+
+```
+static void *coalesce(void *bp);
+```
+
+合并空闲块，四种情况，返回指向该空闲块的指针。
+
+根据上述结构，可以定义一些方便操作的宏：
+
+```
+/* 头部/脚部的大小 */
+#define WSIZE 4
+/* 双字 */
+#define DSIZE 8
+
+/* 扩展堆时的默认大小 */
+#define CHUNKSIZE (1 << 12)
+
+/* 设置头部和脚部的值, 块大小+分配位 */
+#define PACK(size, alloc) ((size) | (alloc))
+
+/* 读写指针p的位置 */
+#define GET(p) (*(unsigned int *)(p))
+#define PUT(p, val) ((*(unsigned int *)(p)) = (val))
+
+/* 从头部或脚部获取大小或分配位 */
+#define GET_SIZE(p) (GET(p) & ~0x7)
+#define GET_ALLOC(p) (GET(p) & 0x1)
+
+/* 给定有效载荷指针, 找到头部和脚部 */
+#define HDRP(bp) ((char*)(bp) - WSIZE)
+#define FTRP(bp) ((char*)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
+
+/* 给定有效载荷指针, 找到前一块或下一块 */
+#define NEXT_BLKP(bp) ((char*)(bp) + GET_SIZE(((char*)(bp) - WSIZE)))
+#define PREV_BLKP(bp) ((char*)(bp) - GET_SIZE(((char*)(bp) - DSIZE)))
+```
+
+### 合并与分割
+
+先**初始化堆**
+
+```c
+/* 
+ * mm_init - initialize the malloc package.
+ */
+int mm_init(void)
+{
+    /* 申请四个字节空间 */
+    if((heap_list = mem_sbrk(4*WSIZE)) == (void *)-1)
+        return -1;
+    PUT(heap_list, 0);                              /* 对齐 */
+    /* 
+     * 序言块和结尾块均设置为已分配, 方便考虑边界情况
+     */
+    PUT(heap_list + (1*WSIZE), PACK(DSIZE, 1));     /* 填充序言块 */
+    PUT(heap_list + (2*WSIZE), PACK(DSIZE, 1));     /* 填充序言块 */
+    PUT(heap_list + (3*WSIZE), PACK(0, 1));         /* 结尾块 */
+
+    heap_list += (2*WSIZE);
+
+    /* 扩展空闲空间 */
+    if(extend_heap(CHUNKSIZE/WSIZE) == NULL)
+        return -1;
+    return 0;
+}
+```
+
+重点在**扩展堆**
+
+```c
+/*
+ * 扩展heap, 传入的是字节数
+*/
+void *extend_heap(size_t words)
+{
+    /* bp总是指向有效载荷 */
+    char *bp;
+    size_t size;
+    /* 根据传入字节数奇偶, 考虑对齐 */
+    size = (words % 2) ? (words+1) * WSIZE : words * WSIZE;
+
+    /* 分配 */
+    if((long)(bp = mem_sbrk(size)) == -1)
+        return NULL;
+
+    /* 设置头部和脚部 */
+    PUT(HDRP(bp), PACK(size, 0));           /* 空闲块头 */
+    PUT(FTRP(bp), PACK(size, 0));           /* 空闲块脚 */
+    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));   /* 片的新结尾块 */
+
+    /* 判断相邻块是否是空闲块, 进行合并 */
+    return coalesce(bp);
+}
+```
+
+扩展堆每次在原始堆的尾部申请空间，`mem_sbrk`函数返回指向旧堆尾部的指针，因此，可以直接将原始堆的尾部位置设置新空闲块的头部。
+
+接下来就是 **free**，设置一下头部和脚部即可，free 完后注意合并空闲块
+
+```c
+/*
+ * mm_free - Freeing a block does nothing.
+ */
+void mm_free(void *ptr)
+{
+    if(ptr==0)
+        return;
+    size_t size = GET_SIZE(HDRP(ptr));
+
+    PUT(HDRP(ptr), PACK(size, 0));
+    PUT(FTRP(ptr), PACK(size, 0));
+    coalesce(ptr);
+}
+```
+
+**分割空闲块**要考虑剩下的空间是否足够放置头部和脚部
+
+```c
+/*
+ * 分离空闲块
+ */
+void place(void *bp, size_t asize)
+{
+    size_t csize = GET_SIZE(HDRP(bp));
+
+    /* 判断是否能够分离空闲块 */
+    if((csize - asize) >= 2*DSIZE) {
+        PUT(HDRP(bp), PACK(asize, 1));
+        PUT(FTRP(bp), PACK(asize, 1));
+        bp = NEXT_BLKP(bp);
+        PUT(HDRP(bp), PACK(csize - asize, 0));
+        PUT(FTRP(bp), PACK(csize - asize, 0));
+    }
+    /* 设置为填充 */
+    else{
+        PUT(HDRP(bp), PACK(csize, 1));
+        PUT(FTRP(bp), PACK(csize, 1));
+    }
+}
+```
+
+**合并**要分四种情况进行处理：
+
+![img](https://pic1.zhimg.com/80/v2-57c9d2d2c2eeabdf83b16930f4f1cd78_720w.webp)
+
+代码：
+
+```c
+/*
+ * 合并空闲块
+*/
+void *coalesce(void *bp)
+{
+    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));     /* 前一块大小 */
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));     /* 后一块大小 */
+    size_t size = GET_SIZE(HDRP(bp));                       /* 当前块大小 */
+
+    /*
+     * 四种情况：前后都不空, 前不空后空, 前空后不空, 前后都空
+     */
+    /* 前后都不空 */
+    if(prev_alloc && next_alloc){
+        return bp;
+    }
+    /* 前不空后空 */
+    else if(prev_alloc && !next_alloc){
+        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));  //增加当前块大小
+        PUT(HDRP(bp), PACK(size, 0));           //先修改头
+        PUT(FTRP(bp), PACK(size, 0));           //根据头部中的大小来定位尾部
+    }
+    /* 前空后不空 */
+    else if(!prev_alloc && next_alloc){
+        size += GET_SIZE(HDRP(PREV_BLKP(bp)));  //增加当前块大小
+        PUT(FTRP(bp), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);                     //注意指针要变
+    }
+    /* 都空 */
+    else{
+        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));  //增加当前块大小
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+    return bp;
+}
+```
+
+### 放置策略
+
+**首次适配**：
+
+```c
+void *find_fit(size_t asize)
+{
+    void *bp;
+    for(bp = heap_list; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)){
+        if((GET_SIZE(HDRP(bp)) >= asize) && (!GET_ALLOC(HDRP(bp)))){
+            return bp;
+        }
+    }
+    return NULL;
+}
+```
+
+**最佳适配**：
+
+```c
+void *best_fit(size_t asize){
+    void *bp;
+    void *best_bp = NULL;
+    size_t min_size = 0;
+    for(bp = heap_list; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)){
+        if((GET_SIZE(HDRP(bp)) >= asize) && (!GET_ALLOC(HDRP(bp)))){
+            if(min_size ==0 || min_size > GET_SIZE(HDRP(bp))){
+                min_size = GET_SIZE(HDRP(bp));
+                best_bp = bp;
+            }
+        }
+    }
+    return best_bp;
+}
+```
+
+### 分配块
+
+最后就是主体部分 mm_malloc 函数，对申请的空间大小按 8 对齐进行舍入，然后根据放置策略查找有无合适的空闲块，如果没有则申请扩展堆
+
+```c
+void *mm_malloc(size_t size)
+{
+    size_t asize;
+    size_t extendsize;
+    char *bp;
+    if(size == 0)
+        return NULL;
+    if(size <= DSIZE)
+        asize = 2*DSIZE;
+    else
+        asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
+    /* 寻找合适的空闲块 */
+    if((bp = best_fit(asize)) != NULL){
+        place(bp, asize);
+        return bp;
+    }
+    /* 找不到则扩展堆 */
+    extendsize = MAX(asize, CHUNKSIZE);
+    if((bp = extend_heap(extendsize/WSIZE)) == NULL)
+        return NULL;
+    place(bp, asize);
+    return bp;
+}
+```
+
+### 性能测试
+
+首次适配(first fit):
+
+![image-20240717170928700](..\imgs\image-20240717170928700.png) 
+
+最佳适配(best fit):
+
+![image-20240717171144081](..\imgs\image-20240717171144081.png) 
+
+下一次适配(next fit):
+
+![image-20240717173449924](..\imgs\image-20240717173449924.png) 
+
+最佳适配提高了空间利用率，但降低了时间利用率即吞吐率。
+
+下一次适配的空间利用率和吞吐率适中，性能表现最好。
