@@ -6,7 +6,7 @@ CSAPP 9.9 动态内存分配，9.10内存垃圾回收
 
 ## 实验概览
 
-Malloc Lab 要求用 C 语言编写一个动态存储分配器，即实现 malloc，free 和 realloc 函数。
+32位系统下，Malloc Lab 要求用 C 语言编写一个动态存储分配器，即实现 malloc，free 和 realloc 函数。
 
 性能表现主要考虑两点：
 
@@ -181,7 +181,7 @@ static void *coalesce(void *bp);
  */
 int mm_init(void)
 {
-    /* 申请四个字节空间 */
+    /* 申请4个字的空间 */
     if((heap_list = mem_sbrk(4*WSIZE)) == (void *)-1)
         return -1;
     PUT(heap_list, 0);                              /* 对齐 */
@@ -405,3 +405,75 @@ void *mm_malloc(size_t size)
 最佳适配提高了空间利用率，但降低了时间利用率即吞吐率。
 
 下一次适配的空间利用率和吞吐率适中，性能表现最好。
+
+## Segregated Free Lists实现
+
+### 结构设置
+
+空闲块设置如图结构：
+
+![img](https://pic2.zhimg.com/80/v2-55c5a289961f0d4dfae5df50a56b7c21_1440w.webp) 
+
+每一个块都有一个头部和脚部，在有效载荷中又分别存放着指向前一个块和后一个块的指针，这被称之为显示空闲链表。所以每个空闲块最小为 16 个字节
+
+堆的结构也是在原来的 Implict Free List 中进行略微改进，如图：
+
+![img](https://pic2.zhimg.com/80/v2-0fa13eb8c700ec0e3fbfd1e4ae40f14d_1440w.webp)
+
+相当于在原来的堆结构中增加了两点：
+
+- 堆结构的前面放置不同等价类空闲块的头指针
+- 每个空闲块的有效载荷分出一部分作为前驱和后继指针
+
+也就是说，我们的这个做法与 Implicit Free List 非常相似，只不过多维护了 n 个链表
+
+根据链表的结构特点，增加了几个操作宏：
+
+```c
+/* 读写指针p的位置 */
+#define GET(p) (*(unsigned int *)(p))
+/* 给定序号，找到链表头节点位置 */
+#define GET_HEAD(num) ((unsigned int *)(long)(GET(heap_list + WSIZE * num)))
+/* 给定bp,找到前驱和后继 */
+#define GET_PRE(bp) ((unsigned int *)(long)(GET(bp)))
+#define GET_SUC(bp) ((unsigned int *)(long)(GET((unsigned int *)bp + 1)))
+```
+
+这里指针转换很繁杂，操作完后，一定要将其强制转换为`unsigned int *`，这样，返回的指针加 1 相当于加 32 个字节，便于定位块中其他部位。
+
+### 大小类设置
+
+由上述结构，每个空闲块最小也要 16 个字节，理论上来说，设置的大小类越多，时间性能要越好，因而设置 20 个大小类： {16},{17∼32},{33∼64},⋯,{2049∼4096},{4097∼9194},⋯,{2^22+1∼∞}
+
+### 结构建立
+
+先看初始化函数
+
+```c
+int mm_init(void)
+{
+    /* 申请四个字节空间 */
+    if((heap_list = mem_sbrk((4+CLASS_SIZE)*WSIZE)) == (void *)-1)
+        return -1;
+    /* 初始化20个大小类头指针 */
+    for(int i = 0; i < CLASS_SIZE; i++){
+        PUT(heap_list + i*WSIZE, NULL);
+    }
+    /* 对齐 */
+    PUT(heap_list + CLASS_SIZE * WSIZE, 0);
+    /* 
+     * 序言块和结尾块均设置为已分配, 方便考虑边界情况
+     */
+    PUT(heap_list + ((1 + CLASS_SIZE)*WSIZE), PACK(DSIZE, 1));     /* 填充序言块 */
+    PUT(heap_list + ((2 + CLASS_SIZE)*WSIZE), PACK(DSIZE, 1));     /* 填充序言块 */
+    PUT(heap_list + ((3 + CLASS_SIZE)*WSIZE), PACK(0, 1));         /* 结尾块 */
+
+
+    /* 扩展空闲空间 */
+    if(extend_heap(CHUNKSIZE/WSIZE) == NULL)
+        return -1;
+    return 0;
+}
+```
+
+见上面画的结构图，在序言块之前放置 20 个空闲链表头指针，剩下的结构与原来完全一样。而扩展堆是在结尾块后进行扩展，因而扩展块操作也与原来相同

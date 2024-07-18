@@ -72,6 +72,16 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char*)(bp) + GET_SIZE(((char*)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char*)(bp) - GET_SIZE(((char*)(bp) - DSIZE)))
 
+/* 读写指针p的位置 */
+#define GET(p) (*(unsigned int *)(p))
+/* 给定序号，找到链表头节点位置 */
+#define GET_HEAD(num) ((unsigned int *)(long)(GET(heap_list + WSIZE * num)))
+/* 给定bp,找到前驱和后继 */
+#define GET_PRE(bp) ((unsigned int *)(long)(GET(bp)))
+#define GET_SUC(bp) ((unsigned int *)(long)(GET((unsigned int *)bp + 1)))
+/* 设置类大小 */
+#define CLASS_SIZE 20
+
 /* 总是指向序言块的第二块 */
 static char *heap_list;
 
@@ -86,21 +96,24 @@ static void place(void *bp, size_t asize);  //分割空闲块
 /* 
  * mm_init - initialize the malloc package.
  */
-//设立序言块、结尾块，以及序言块前的对齐块（4B），总共需要4个4B的空间
 int mm_init(void)
-{ 
-    /* 申请四个字的空间 */
-    if((heap_list = mem_sbrk(4*WSIZE)) == (void *)-1)
-        return -1; //申请失败
-    PUT(heap_list, 0);                              /* 双字对齐 */
+{
+    /* 申请(4+大小类数)个字的空间 */
+    if((heap_list = mem_sbrk((4+CLASS_SIZE)*WSIZE)) == (void *)-1)
+        return -1;
+        /* 对齐 */
+    PUT(heap_list, 0);
+    /* 初始化20个大小类头指针 */
+    for(int i = 0; i < CLASS_SIZE; i++){
+        PUT(heap_list + (i+1)*WSIZE, NULL);
+    }
     /* 
      * 序言块和结尾块均设置为已分配, 方便考虑边界情况
      */
-    PUT(heap_list + (1*WSIZE), PACK(DSIZE, 1));     /* 填充序言块头部 */
-    PUT(heap_list + (2*WSIZE), PACK(DSIZE, 1));     /* 填充序言块脚部 */
-    PUT(heap_list + (3*WSIZE), PACK(0, 1));         /* 结尾块 */
+    PUT(heap_list + ((1 + CLASS_SIZE)*WSIZE), PACK(DSIZE, 1));     /* 填充序言块 */
+    PUT(heap_list + ((2 + CLASS_SIZE)*WSIZE), PACK(DSIZE, 1));     /* 填充序言块 */
+    PUT(heap_list + ((3 + CLASS_SIZE)*WSIZE), PACK(0, 1));         /* 结尾块 */
 
-    heap_list += (2*WSIZE); //令heap_list指向有效载荷起始处
 
     /* 扩展空闲空间 */
     if(extend_heap(CHUNKSIZE/WSIZE) == NULL)

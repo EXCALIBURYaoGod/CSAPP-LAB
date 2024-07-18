@@ -1,4 +1,7 @@
+# Attack Lab
+
 ## Prepration
+
 实验目的：
 1、了解缓冲区溢出（stack discipline）
 2、write code away from stack discipline
@@ -15,7 +18,7 @@ CSAPP-AttackLab
 实验环境：
 Centos8-Linux
 
-# Phase1
+## Phase1
 
 objdump -d ./ctarget>>ctarget.s //反汇编
 ![](../imgs/Pasted image 20240620171305.png)
@@ -29,9 +32,7 @@ phase1_ans.txt:
 	00 00 00 00 00 00 00 00
 	c0 17 40 00 00 00 00 00
 
---------------------------
-
-# Phase2
+## Phase2
 
 ![](../imgs/Pasted image 20240621112009.png) 
 
@@ -88,7 +89,7 @@ ec 17 40 c3 00 00 00 00
 00 00 00 00 00 00 00 00
 78 dc 61 55 00 00 00 00
 
-# Phase3
+## Phase3
 
 ![](../imgs/微信截图_20240624163459.png) 
 
@@ -137,7 +138,7 @@ fa 18 40 00 c3 00 00 00 // pushq $0x4018fa, 赋值%rsp，跳转touch3
 78 dc 61 55 00 00 00 00 //0x5561dc78, 跳转到<Get>前
 35 39 62 39 39 37 66 61 //0x5561dca8, 存储的字符串hex码
 
-# Phase4
+## Phase4
 
 ![](../imgs/微信截图_20240625161014.png) 
 
@@ -357,7 +358,7 @@ a2 19 40 00 00 00 00 00 //跳转执行0x4019a2: movq %rax,%rdi; req
 ec 17 40 00 00 00 00 00 //跳转到touch2
 ```
 
-# Phase5
+## Phase5
 
 ![image-20240626163644127](../imgs/image-20240626163644127.png)  
 
