@@ -477,3 +477,260 @@ int mm_init(void)
 ```
 
 见上面画的结构图，在序言块之前放置 20 个空闲链表头指针，剩下的结构与原来完全一样。而扩展堆是在结尾块后进行扩展，因而扩展块操作也与原来相同
+
+```c
+/*
+ * 扩展heap, 传入的是字节数
+*/
+void *extend_heap(size_t words)
+{
+    /* bp总是指向有效载荷 */
+    char *bp;
+    size_t size;
+    /* 根据传入字节数奇偶, 考虑对齐 */
+    size = (words % 2) ? (words+1) * WSIZE : words * WSIZE;
+
+    /* 分配 */
+    if((long)(bp = mem_sbrk(size)) == -1)
+        return NULL;
+
+    /* 设置头部和脚部 */
+    PUT(HDRP(bp), PACK(size, 0));           /* 空闲块头 */
+    PUT(FTRP(bp), PACK(size, 0));           /* 空闲块脚 */
+    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));   /* 片的新结尾块 */
+
+    /* 判断相邻块是否是空闲块, 进行合并 */
+    return coalesce(bp);
+}
+```
+
+### 维护链表
+
+在知道要请求块的大小后，我们要先根据大小定位到相应大小类的头结点：
+
+```c
+/* 
+ * search - 找到块大小对应的等价类的序号
+ */
+int search(size_t size)
+{
+    int i;
+    for(i = 4; i <=22; i++){
+        if(size <= (1 << i))
+            return i-4;
+    }
+    return i-4;
+}
+```
+
+注意，头结点位置下标是从 0 开始，所以返回`i-4`。这里还可以写一个二分查找的形式，但是优化作用不大。
+
+找到头结点后，就涉及到双向链表的插入和删除了，下面编写这两个函数
+
+```c
+/*
+ *  插入块, 将块插到表头
+ */
+void insert(void *bp)
+{
+    /* 块大小 */
+    size_t size = GET_SIZE(HDRP(bp));
+    /* 根据块大小找到头节点位置 */
+    int num = search(size);
+    /* 空的，直接放 */
+    if(GET_HEAD(num) == NULL){
+        PUT(heap_list + WSIZE * num, bp);
+        /* 前驱 */
+        PUT(bp, NULL);
+        /* 后继 */
+        PUT((unsigned int *)bp + 1, NULL);
+    } else {
+        /* bp的后继放第一个节点 */
+        PUT((unsigned int *)bp + 1, GET_HEAD(num));
+        /* 第一个节点的前驱放bp */
+        PUT(GET_HEAD(num), bp);
+        /* bp的前驱为空 */   
+        PUT(bp, NULL);
+        /* 头节点放bp */
+        PUT(heap_list + WSIZE * num, bp);
+    }
+}
+```
+
+这个函数还是比较容易编写的，主要是要注意以下几点：
+
+- 插入块总是插入到表头
+- 指针问题要细致考虑。比如：`heap_list + WSIZE * num`是对应大小类头结点在堆中的位置，而`GET_HEAD(num)`是大小类头结点存放的第一个块的地址
+
+```c
+/*
+ *  删除块,清理指针
+ */
+void delete(void *bp)
+{
+    /* 块大小 */
+    size_t size = GET_SIZE(HDRP(bp));
+    /* 根据块大小找到头节点位置 */
+    int num = search(size);
+    /* 
+     * 唯一节点,后继为null,前驱为null 
+     * 头节点设为null
+     */
+    if (GET_PRE(bp) == NULL && GET_SUC(bp) == NULL) { 
+        PUT(heap_list + WSIZE * num, NULL);
+    } 
+    /* 
+     * 最后一个节点 
+     * 前驱的后继设为null
+     */
+    else if (GET_PRE(bp) != NULL && GET_SUC(bp) == NULL) {
+        PUT(GET_PRE(bp) + 1, NULL);
+    } 
+    /* 
+     * 第一个结点 
+     * 头节点设为bp的后继
+     */
+    else if (GET_SUC(bp) != NULL && GET_PRE(bp) == NULL){
+        PUT(heap_list + WSIZE * num, GET_SUC(bp));
+        PUT(GET_SUC(bp), NULL);
+    }
+    /* 
+     * 中间结点 
+     * 前驱的后继设为后继
+     * 后继的前驱设为前驱
+     */
+    else if (GET_SUC(bp) != NULL && GET_PRE(bp) != NULL) {
+        PUT(GET_PRE(bp) + 1, GET_SUC(bp));
+        PUT(GET_SUC(bp), GET_PRE(bp));
+    }
+}
+```
+
+- 考虑四种情况就好，注释写得很详细了
+- 同样要注意指针的问题。比如：`GET_PRE(bp) + 1`是`bp`指向的块的前驱的后继的**位置**；而`GET_PRE(bp+1)`是`bp`指向的块的后继。我在这里因为 segmentation fault 卡了好久。
+
+### 合并与分割
+
+合并操作还是与 Implict Free List 一样，是根据空	闲块在堆中位置相邻来合并的，与链表排列无关
+
+```c
+/*
+ * 合并空闲块
+*/
+void *coalesce(void *bp)
+{
+    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));     /* 前一块大小 */
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));     /* 后一块大小 */
+    size_t size = GET_SIZE(HDRP(bp));                       /* 当前块大小 */
+
+    /*
+     * 四种情况：前后都不空, 前不空后空, 前空后不空, 前后都空
+     */
+    /* 前后都不空 */
+    if(prev_alloc && next_alloc){
+        insert(bp);
+        return bp;
+    }
+    /* 前不空后空 */
+    else if(prev_alloc && !next_alloc){
+        /* 将后面的块从其链表中删除 */
+        delete(NEXT_BLKP(bp));
+        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));  //增加当前块大小
+        PUT(HDRP(bp), PACK(size, 0));           //先修改头
+        PUT(FTRP(bp), PACK(size, 0));           //根据头部中的大小来定位尾部
+    }
+    /* 前空后不空 */
+    else if(!prev_alloc && next_alloc){
+        /* 将其前面的快从链表中删除 */
+        delete(PREV_BLKP(bp));
+        size += GET_SIZE(HDRP(PREV_BLKP(bp)));  //增加当前块大小
+        PUT(FTRP(bp), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);                     //注意指针要变
+    }
+    /* 都空 */
+    else{
+        /* 将前后两个块都从其链表中删除 */
+        delete(NEXT_BLKP(bp));
+        delete(PREV_BLKP(bp));
+        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));  //增加当前块大小
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+    /* 空闲块准备好后,将其插入合适位置 */
+    insert(bp);
+    return bp;
+}
+```
+
+- 操作与 Implict Free List 几乎相同
+- 额外的操作就是合并前要将前后的空闲块从它的原链表中删除，合并完成后要将新的空闲块插入对应的空闲链表中
+
+```c
+/*
+ * 分离空闲块
+ */
+void place(void *bp, size_t asize)
+{
+    size_t csize = GET_SIZE(HDRP(bp));
+
+    /* 块已分配，从空闲链表中删除 */
+    delete(bp);
+    if((csize - asize) >= 2*DSIZE) {
+        PUT(HDRP(bp), PACK(asize, 1));
+        PUT(FTRP(bp), PACK(asize, 1));
+        /* bp指向空闲块 */
+        bp = NEXT_BLKP(bp);
+        PUT(HDRP(bp), PACK(csize - asize, 0));
+        PUT(FTRP(bp), PACK(csize - asize, 0));
+        /* 加入分离出来的空闲块 */
+        insert(bp);
+    }
+    /* 设置为填充 */
+    else{
+        PUT(HDRP(bp), PACK(csize, 1));
+        PUT(FTRP(bp), PACK(csize, 1));
+    }
+}
+```
+
+- 分离空闲块也只是加入了将分离出来的空闲块插入相应空闲链表的操作
+
+### 分配块
+
+Segregated Fit 的分配策略就很清晰了：
+
+- 先从对应的大小类的空闲链表中查找
+- 如果找不到，则到下一个更大的大小类查找
+- 如果都找不到，则扩展堆
+
+```c
+/*
+ * 首次适配
+ */
+void *find_fit(size_t asize)
+{
+    int num = search(asize);
+    unsigned int* bp;
+    /* 如果找不到合适的块，那么就搜索下一个更大的大小类 */
+    while(num < CLASS_SIZE) {
+        bp = GET_HEAD(num);
+        /* 不为空则寻找 */
+        while(bp) {
+            if(GET_SIZE(HDRP(bp)) >= asize){
+                return (void *)bp;
+            }
+            /* 用后继找下一块 */
+            bp = GET_SUC(bp);
+        }
+        /* 找不到则进入下一个大小类 */
+        num++;
+    }
+    return NULL;
+}
+```
+
+### 性能测试
+
+![image-20240719140454543](..\imgs\image-20240719140454543.png) 
