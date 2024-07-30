@@ -8,7 +8,10 @@ CC = gcc
 CFLAGS = -g -Wall
 LDFLAGS = -lpthread
 
-all: proxy hex2dd dd2hex
+all: test proxy hex2dd dd2hex
+
+test.o: test.c csapp.h
+	$(CC) $(CFLAGS) -c test.c
 
 hex2dd.o: hex2dd.c csapp.h
 	$(CC) $(CFLAGS) -c hex2dd.c
@@ -31,11 +34,14 @@ hex2dd: hex2dd.o csapp.o
 dd2hex:	dd2hex.o csapp.o 
 	$(CC) $(CFLAGS) -o dd2hex dd2hex.o csapp.o $(LDFLAGS)
 
+test: test.o csapp.o
+	$(CC) $(CFLAGS) -o test test.o csapp.o $(LDFLAGS)
+
 # Creates a tarball in ../proxylab-handin.tar that you can then
 # hand in. DO NOT MODIFY THIS!
 handin:
 	(make clean; cd ..; tar cvf $(USER)-proxylab-handin.tar proxylab-handout --exclude tiny --exclude nop-server.py --exclude proxy --exclude driver.sh --exclude port-for-user.pl --exclude free-port.sh --exclude ".*")
 
 clean:
-	rm -f *~ *.o proxy core hex2dd dd2hex *.tar *.zip *.gzip *.bzip *.gz
+	rm -f *~ *.o  test proxy core hex2dd dd2hex *.tar *.zip *.gzip *.bzip *.gz
 

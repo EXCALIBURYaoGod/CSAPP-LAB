@@ -1,14 +1,3 @@
-# ProxyLab
-
-## 预备知识
-
-CSAPP Unix IO：
-
-RIO接口
-
-![image-20240730155324767](..\imgs\image-20240730155324767.png) 
-
-```
 #include "csapp.h"
 
 ssize_t rio_readn(int fd, void *usrbuf, size_t n);
@@ -141,22 +130,3 @@ ssize_t rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
     *bufp = 0; //此时bufp指向该行字符串结尾，因此要添加\0表示结束
     return n - 1;
 }
-
-```
-
- 
-
-客户端-服务器模型：
-
-![img](../imgs/image.png)  
-
-应用程序网络模型：
-
-![image-20240726135830304](..\imgs\image-20240726135830304.png) 
-
-- ip地址是大端字节序，主机地址不一定
-- 一个域名可以对应多个ip地址
-
-套接字接口网络应用模型：
-
-![image-20240726140207655](..\imgs\image-20240726140207655.png) 
